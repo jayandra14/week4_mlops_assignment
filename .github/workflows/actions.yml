@@ -1,0 +1,81 @@
+name: Continuous Machine Learning (CML)
+
+on:
+  push:
+    branches:
+      - dev
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  test-and-evaluate-model:
+    name: Test and Evaluate Model
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v5
+
+      - name: Setup CML (Continuous Machine Learning)
+        uses: iterative/setup-cml@v2.0.1
+
+      - name: Install Dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install dvc dvc-gs
+
+      - name: Google Cloud Authentication
+        id: auth
+        uses: google-github-actions/auth@v3
+        with:
+          credentials_json: ${{ secrets.GCP_KEY }}
+
+      - name: Pull Data and Model using DVC
+        run: |
+          dvc pull *.dvc
+
+      - name: Run Pytest Suite
+        run: |
+          pytest -v &> test_output.txt
+
+      - name: Model Evaluation
+        run: |
+          mkdir metrics
+          python3 create_metrics.py
+  
+      - name: Create CML Report
+        run: |
+          echo "# CML Test & Evaluation Report" > report.md
+
+          ## Section 1: Pytest Results
+          echo "" >> report.md
+          echo "### Pytest Sanity Check" >> report.md
+          echo "\`\`\`" >> report.md
+          cat test_output.txt >> report.md
+          echo "\`\`\`" >> report.md
+
+          ## Section 2: Evaluation Metrics Table
+          echo "" >> report.md
+          echo "### Evaluation Metrics" >> report.md
+          python3 - <<'EOF' >> report.md
+          import pandas as pd
+          from tabulate import tabulate
+          df = pd.read_csv("metrics/report.csv")
+          markdown_table = tabulate(df, headers='keys', tablefmt='github', showindex=False)
+          print(markdown_table)
+          EOF
+
+
+          ## Section 3: Confusion Matrix Visualization
+          echo "" >> report.md
+          echo "### Confusion Matrix" >> report.md
+          echo "![](./metrics/confusion_matrix.png)" >> report.md
+
+          cml comment create report.md
+        env:
+          REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
